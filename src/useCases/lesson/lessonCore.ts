@@ -1,12 +1,11 @@
 import { MCQ, questions } from "@/app/models/questions";
-import { State, Event } from "@/app/models/state";
+import { State, Event } from "@/app/models/lesson";
 import { Message } from "ai";
-import { didUserUnderstandTheExplanation, didTheUserAnswerCorrectlyToTheQuestion } from "./openAIManager";
+import { didUserUnderstandTheExplanation, didTheUserAnswerCorrectlyToTheQuestion } from "../openAI/openAIManager";
 
 
-let lesson: Lesson;
 
-type Lesson = {
+export type Lesson = {
     currentState: State,
     word: string,
     numberOfQuestionsAsked: number,
@@ -15,7 +14,15 @@ type Lesson = {
     lastQuestionAsked?: MCQ
 }
 
-function getNextState(lesson: Lesson, event: Event): State {
+function didUserCompleteTheLesson(lesson: Lesson) {
+    return lesson.numberOfQuestionsAsked === 3 && lesson.score >= 2;   
+}
+
+function didUserFailTheLesson(lesson: Lesson) {
+    return lesson.numberOfQuestionsAsked === 3 && lesson.score < 2
+}
+
+export function getNextState(lesson: Lesson, event: Event): State {
     switch (lesson.currentState) {
         case "IDLE":
             switch(event) {
@@ -30,11 +37,11 @@ function getNextState(lesson: Lesson, event: Event): State {
                     return "EXPLAIN_WORD"
             }
         case "ASK_QUESTION":
-            switch(event) { // TODO: Refactor this later.
+            switch(event) {
                 case "USER_RESPONDS_CORRECTLY_TO_QUESTION":
                 case "USER_RESPONDS_WRONG_TO_QUESTION":
-                    if (lesson.numberOfQuestionsAsked === 3 && lesson.score >= 2) return "END"
-                    else if (lesson.numberOfQuestionsAsked === 3 && lesson.score < 2) return "EXPLAIN_WORD"
+                    if (didUserCompleteTheLesson(lesson)) return "END"
+                    else if (didUserFailTheLesson(lesson)) return "EXPLAIN_WORD"
                     else return "ASK_QUESTION"
             }
     }
@@ -43,18 +50,7 @@ function getNextState(lesson: Lesson, event: Event): State {
 }
 
 
-export async function intitialiseLesson(word: string) {
-    lesson = {
-        currentState: "IDLE",
-        word,
-        numberOfQuestionsAsked: 0,
-        score: 0,
-        lastEvent: "SUCCESSFUL_COMPLETION" // just for initialisation. The cycle of life maybe... :)
-    }
-    lesson.currentState = getNextState(lesson, "START");
-    console.log("Initialized", lesson);
-}
-export async function extractEvent(lesson: Lesson, message: Message): Promise<Event> {
+export async function getEvent(lesson: Lesson, message: Message): Promise<Event> {
     
     if (lesson.currentState === "EXPLAIN_WORD") {
         let didUserUnderstand = await didUserUnderstandTheExplanation(message.content);
@@ -63,7 +59,6 @@ export async function extractEvent(lesson: Lesson, message: Message): Promise<Ev
         else return "USER_DID_NOT_UNDERSTAND";
     }
     if (lesson.currentState === "ASK_QUESTION") {
-         // this is hack to determine questions based on index,TODO: make it random, store the current question in lesson obj
         let didUserAnswerCorrectly = await didTheUserAnswerCorrectlyToTheQuestion(message.content, lesson.lastQuestionAsked!!);
         if (didUserAnswerCorrectly) return "USER_RESPONDS_CORRECTLY_TO_QUESTION";
         else return "USER_RESPONDS_WRONG_TO_QUESTION";
@@ -73,15 +68,15 @@ export async function extractEvent(lesson: Lesson, message: Message): Promise<Ev
 }
 
 
-function getNextQuestion(lesson: Lesson) {
+export function getNextQuestion(lesson: Lesson) {
     lesson.lastQuestionAsked = questions[lesson.word][lesson.numberOfQuestionsAsked];
     return lesson.lastQuestionAsked;
 }
 
-function nextAction(state: State, event: Event): Message {
-    switch(state) {
+export function getNextPrompt(lesson: Lesson): Message {
+    switch(lesson.currentState) {
         case "EXPLAIN_WORD":
-            switch(event) {
+            switch(lesson.lastEvent) {
                 case "USER_DID_NOT_UNDERSTAND":
                     return { id: "explain_again", role: "system", content: `Please explain the word again. Ask if they understood it.` }
                 case "USER_UNDERSTOOD":
@@ -105,7 +100,7 @@ function nextAction(state: State, event: Event): Message {
                     }
             }
         case "ASK_QUESTION":
-            switch(event) {
+            switch(lesson.lastEvent) {
                 case "USER_UNDERSTOOD":
                     return {
                         id: "move_on_to_questions",
@@ -159,7 +154,7 @@ function nextAction(state: State, event: Event): Message {
                     
             }
         case "END":
-            switch(event) {
+            switch(lesson.lastEvent) {
                 case "USER_RESPONDS_CORRECTLY_TO_QUESTION":
                     return {
                         id: "end",
@@ -179,36 +174,25 @@ function nextAction(state: State, event: Event): Message {
     return {id: "Nothing", role: "system", content: ""}
 }
 
-function updateState(lesson: Lesson, event: Event) {
-    // after the session ends, refresh the score and question numbers again.
-    // maintain an END state.
+export function updateState(lesson: Lesson, event: Event) { // all state updates happen here.
+  
     if (event === "USER_RESPONDS_CORRECTLY_TO_QUESTION") lesson.score++;
     if (lesson.currentState === "ASK_QUESTION") lesson.numberOfQuestionsAsked++;
 
 
     let nextState = getNextState(lesson, event);
     
-    if (nextState === "EXPLAIN_WORD" && 
-            (
-                event === "USER_RESPONDS_CORRECTLY_TO_QUESTION" || 
-                event === "USER_RESPONDS_WRONG_TO_QUESTION"
-            )
-    ) { // condition to explain again.
-        // reset question index,
+    if (
+        nextState === "EXPLAIN_WORD" && // when the user fails to get desired score, we reexplain
+        (
+            event === "USER_RESPONDS_CORRECTLY_TO_QUESTION" || 
+            event === "USER_RESPONDS_WRONG_TO_QUESTION"
+        )
+    ) {
         lesson.numberOfQuestionsAsked = 0;
         lesson.score = 0;
     }
 
     lesson.currentState = nextState;
     lesson.lastEvent = event;
-}
-export async function updateLesson(latestUserMessage: Message) {
-    
-    const currentEvent = await extractEvent(lesson, latestUserMessage);
-    
-    updateState(lesson, currentEvent);
-    const nextPrompt = nextAction(lesson.currentState, currentEvent);
-
-    console.log("updated state", lesson);
-    return nextPrompt;
 }

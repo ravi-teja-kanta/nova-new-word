@@ -1,6 +1,6 @@
 import { MCQ } from "@/app/models/questions";
 import { openai } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { generateText, Message, StreamingTextResponse, streamText } from "ai";
 
 export async function didUserUnderstandTheExplanation(userResponse: string) {
     const result = await generateText({
@@ -22,4 +22,18 @@ export async function didTheUserAnswerCorrectlyToTheQuestion(userResponse: strin
     const response = result.text.toLocaleLowerCase();
     console.log("results", response, question.correctAnswer.toLocaleLowerCase());
     return response === question.correctAnswer.toLocaleLowerCase()
+}
+
+export async function completeChat(messages: any[]) {
+    const system = `
+        You are a helpful and understanding teacher called nova. 
+        You are assigned the task of teaching new words to a user who is a 10 year old.
+    `
+    const result =  await streamText({
+        system,
+        model: openai('gpt-4'),
+        messages,
+    });
+
+    return new StreamingTextResponse(result.toAIStream())
 }
