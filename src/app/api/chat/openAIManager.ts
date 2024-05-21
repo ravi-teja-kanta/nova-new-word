@@ -16,7 +16,7 @@ export async function didUserUnderstandTheExplanation(userResponse: string) {
 export async function didTheUserAnswerCorrectlyToTheQuestion(userResponse: string, question: MCQ) {
     const result = await generateText({
         model: openai("gpt-4"),
-        prompt: `Answer only with A,B,C,D, which option does the following response match closely to ${question.options.join(" ")}. Answer with one character of the option name. response: "${userResponse}"`
+        prompt: `Answer only with A,B,C,D, which option does the following response match closely to ${question.options.join(" ")}. Answer STRICTLY and ONLY with one character of the option name. response: "${userResponse}"`
     });
     
     const response = result.text.toLocaleLowerCase();

@@ -36,6 +36,16 @@ export const questions = {
                 "D) Old newspapers"
             ],
             "correctAnswer": "B"
+        },
+        {
+            "question": "If someone says a tradition is sacrosanct, they mean it is:",
+            "options": [
+                "A) Open to change at any time",
+                "B) Not very important and can be skipped",
+                "C) Highly respected and must not be altered",
+                "D) Boring and outdated"
+            ],
+            "correctAnswer": "C"
         }
     ]
 } as {
